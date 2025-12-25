@@ -12,7 +12,7 @@ layout(std430, binding = 1) buffer Velocities
     vec4 velocities[];
 }; 
 
-layout(std430, binding = 2) buffer PositionsOut
+layout(std430, binding = 3) buffer PositionsOut
 {
     vec4 positions_and_masses_out[];
 };
@@ -22,34 +22,8 @@ shared vec4 local_positions_and_masses_in[128];
 uniform uint count;
 uniform float dt;
 uniform float gravity;
-uniform float distance_threshold;
 uniform uint iter_per_frame;
-
-// vec4 compute_acceleration(uint gid)
-// {
-//     vec4 acceleration = vec4(0.0);
-    
-//     for (uint i = 0; i < count; ++i)
-//     {
-//         if (i == gid)
-//         {
-//             continue;
-//         }
-
-//         vec4 dpos = positions[i] - positions[gid];
-//         float distance_sq = dot(dpos, dpos);
-
-//         if (distance_sq < distance_threshold * distance_threshold)
-//         {
-//             continue;
-//         }
-
-//         float inv_r3 = 1.0 / (distance_sq * sqrt(distance_sq));
-//         acceleration += gravity * masses[i] * dpos * inv_r3;
-//     }
-
-//     return acceleration;
-// }
+uniform float softening;
 
 vec3 compute_acceleration(vec3 position, uint gid, uint tile_size)
 {
@@ -77,12 +51,8 @@ vec3 compute_acceleration(vec3 position, uint gid, uint tile_size)
             }
 
             vec3 dpos = local_positions_and_masses_in[j].xyz - position;
-            float distance_sq = dot(dpos, dpos);
-
-            if (distance_sq < distance_threshold * distance_threshold)
-            {
-                continue;
-            }
+            float eps_sq = softening * softening;
+            float distance_sq = dot(dpos, dpos) + eps_sq;
 
             float inv_r = inversesqrt(distance_sq);
             float inv_r3 = inv_r * inv_r * inv_r;
@@ -109,9 +79,11 @@ void main()
 
     for (uint i = 0; i < iter_per_frame; ++i)
     {
-        vec3 acceleration = compute_acceleration(position, gid, 256);
+        vec3 acceleration = compute_acceleration(position, gid, 128);
         velocity += acceleration * dt;
         position += velocity * dt;
+
+        // if (length(acceleration) < 0 || dt < 0) return;
     }
 
     velocities[gid] = vec4(velocity, 0.0);

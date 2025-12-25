@@ -14,17 +14,18 @@
 
 struct Scene
 {
-    static constexpr std::size_t COUNT = 32768;
+    static constexpr std::size_t COUNT = 41000; //32768;
     static constexpr float DT = 1.0f / 60.0f;
-    static constexpr float GRAVITY = 1.0f;
-    static constexpr float DISTANCE_THRESHOLD = 1e-8f;
+    static constexpr float GRAVITY = 156000.f; // 1.0f;
+    static constexpr std::size_t ITER_PER_FRAME = 1;
+    static constexpr float SOFTENING = 150.0f;
 
-    // std::vector<float> masses;
     std::vector<glm::vec4> positions_and_masses; // x, y, z, m
-    std::vector<glm::vec4> velocities;
+    std::vector<glm::vec4> velocities;           // vx, vy, vz, 0
+    std::vector<glm::vec4> colors;               // r, g, b, a
 
     Scene()
-        : positions_and_masses(COUNT, glm::vec4(0, 0, 0, 1)), velocities(COUNT)
+        : positions_and_masses(COUNT, glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)), velocities(COUNT, glm::vec4(0.0f)), colors(COUNT, glm::vec4(1.0f))
     {
     }
 };
@@ -34,8 +35,8 @@ struct ComputeUniforms
     GLint count;
     GLint dt;
     GLint gravity;
-    GLint distance_threshold;
     GLint iter_per_frame;
+    GLint softening;
 };
 
 struct RenderUniforms
@@ -43,30 +44,37 @@ struct RenderUniforms
     GLint mvp;
 };
 
+/*
+- Mass in solar mass (1.9884e30 kg)
+- Distance in light year (9.461e15 m)
+- Time in 1M year (1M * 31 557 600s)
+
+=> G = 1.56e-5
+*/
+
 // Scene creation params
-static constexpr std::size_t iteration_per_frame = 1;
 static constexpr float PI = 3.141592653589793;
-static constexpr float mass_min = 0.1f;
-static constexpr float mass_max = 100.0f;
-static constexpr float angle_min = 0.0f;
-static constexpr float angle_max = 2.0 * PI;
-static constexpr float radius_min = 200.0f;
-static constexpr float radius_max = 2000.0f;
-static constexpr float black_hole_mass = 1e6;
-static constexpr float galaxy_thickness = 0.1f;
+static constexpr float MASS_MIN = 0.1f;
+static constexpr float MASS_MAX = 100.0f;
+static constexpr float ANGLE_MIN = 0.0f;
+static constexpr float ANGLE_MAX = 2.0 * PI;
+static constexpr float RADIUS_MIN = 2000.0f;
+static constexpr float RADIUS_MAX = 50000.0f;
+static constexpr float BLACK_HOLE_MASS = 4.297e6;
+static constexpr float GALAXY_THICKNESS = 0.05f;
 
 // Shader related
 static GLuint compute_program = 0;
 static GLuint render_program = 0;
-static const std::filesystem::path compute_shader_filepath = "../shaders/compute.glsl";
-static const std::filesystem::path vertex_shader_filepath = "../shaders/vertex.glsl";
-static const std::filesystem::path fragment_shader_filepath = "../shaders/fragment.glsl";
+static const std::filesystem::path COMPUTE_SHADER_FILEPATH = "../shaders/compute.glsl";
+static const std::filesystem::path VERTEX_SHADER_FILEPATH = "../shaders/vertex.glsl";
+static const std::filesystem::path FRAGMENT_SHADER_FILEPATH = "../shaders/fragment.glsl";
 
 // Work group size
-static constexpr GLuint workgroup_size = 128;
-static constexpr GLuint num_groups_x = (Scene::COUNT + workgroup_size - 1) / workgroup_size;
-static constexpr GLuint num_groups_y = 1;
-static constexpr GLuint num_groups_z = 1;
+static constexpr GLuint WORKGROUP_SIZE = 128;
+static constexpr GLuint NUM_GROUPS_X = (Scene::COUNT + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+static constexpr GLuint NUM_GROUPS_Y = 1;
+static constexpr GLuint NUM_GROUPS_Z = 1;
 
 // Inputs
 static bool reloaded = true;
@@ -75,12 +83,12 @@ static bool first_motion = true;
 
 // Camera - looking at (0, 0, 0) from a sphere
 static float fov = 80.0f;
-static float r = radius_max;
+static float r = RADIUS_MAX;
 static float theta = 0.0f;
 static float phi = 0.0f;
 static float prev_xpos = 0.0f;
 static float prev_ypos = 0.0f;
-static float zoom_factor = 16.0f;
+static float zoom_factor = 256.0f;
 
 static void error_callback(int error, const char *description)
 {
@@ -97,7 +105,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 
     if (key == GLFW_KEY_R && action == GLFW_PRESS)
     {
-        compute_program = reload_compute_shader_program(compute_program, compute_shader_filepath);
+        compute_program = reload_compute_shader_program(compute_program, COMPUTE_SHADER_FILEPATH);
         reloaded = (compute_program != 0);
     }
 }
@@ -141,7 +149,7 @@ static void mouse_motion_callback(GLFWwindow *window, double xpos, double ypos)
 static void mouse_scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
 {
     r -= yoffset * zoom_factor;
-    r = std::clamp(r, 0.5f * radius_min, 2.0f * radius_max);
+    r = std::clamp(r, 0.5f * RADIUS_MIN, 2.0f * RADIUS_MAX);
 }
 
 std::string vec3_to_string(const glm::vec3 &v)
@@ -149,17 +157,62 @@ std::string vec3_to_string(const glm::vec3 &v)
     return "Vec3(x=" + std::to_string(v.x) + ", y=" + std::to_string(v.y) + ", z=" + std::to_string(v.z) + ")";
 }
 
-Scene create_scene(uint32_t seed)
+float hash(uint32_t seed)
+{
+    uint32_t state = seed * 747796405u + 2891336453u;
+    uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    word = (word >> 22u) ^ word;
+    
+    return static_cast<float>(word) / static_cast<float>(UINT32_MAX);
+}
+
+glm::vec4 star_color(uint32_t seed)
+{
+    float temperature = hash(seed) * 30000.0f + 3000.0f;
+
+    glm::vec4 color(1.0f);
+
+    // Red - Yellow
+    if (temperature < 6600.0) 
+    {
+        
+        color.r = 1.0f;
+        color.g = glm::mix(0.4f, 1.0f, (temperature - 3000.0f) / 3600.0f);
+        color.b = glm::mix(0.2f, 1.0f, glm::smoothstep(5000.0f, 6600.0f, temperature));
+    } 
+
+    // White - Blue
+    else 
+    {
+        color.r = glm::mix(1.0f, 0.7f, (temperature - 6600.0f) / 23400.0f);
+        color.g = glm::mix(1.0f, 0.8f, (temperature - 6600.0f) / 23400.0f);
+        color.b = 1.0f;
+    }
+    
+    return color;
+}
+
+glm::vec4 star_color(const glm::vec4 &pos)
+{
+    if (pos.x < 0)
+    {
+        return glm::vec4(0.8f, 0.5f, 0.3f, 1.0f);
+    }
+    return glm::vec4(0.2f, 0.6f, 0.3f, 1.0f);
+}
+
+// Galaxy with black hole
+Scene create_galaxy_bh_scene(uint32_t seed)
 {
     Scene scene;
 
     std::mt19937 rng(seed);
 
-    std::uniform_real_distribution<float> masses(mass_min, mass_max);
-    std::uniform_real_distribution<float> angle(angle_min, angle_max);
-    std::uniform_real_distribution<float> radius(radius_min, radius_max);
+    std::uniform_real_distribution<float> masses(MASS_MIN, MASS_MAX);
+    std::uniform_real_distribution<float> angle(ANGLE_MIN, ANGLE_MAX);
+    std::uniform_real_distribution<float> radius(RADIUS_MIN, RADIUS_MAX);
 
-    scene.positions_and_masses[0] = glm::vec4(0.0f, 0.0f, 0.0f, black_hole_mass);
+    scene.positions_and_masses[0] = glm::vec4(0.0f, 0.0f, 0.0f, BLACK_HOLE_MASS);
     scene.velocities[0] = glm::vec4(0.0f);
 
     for (std::size_t i = 1; i < Scene::COUNT; ++i)
@@ -170,18 +223,126 @@ Scene create_scene(uint32_t seed)
         float theta = angle(rng);
 
         float x = r * cos(theta);
-        float y = galaxy_thickness * radius(rng) * ((rng() % 2) ? 1.0f : -1.0f);
+        float y = GALAXY_THICKNESS * radius(rng) * ((rng() % 2) ? 1.0f : -1.0f);
         float z = r * sin(theta);
         scene.positions_and_masses[i] = glm::vec4(x, y, z, m);
 
-        float v = sqrt(Scene::GRAVITY * black_hole_mass / r);
+        float v = sqrt(Scene::GRAVITY * BLACK_HOLE_MASS / r);
         float vx = -v * sin(theta);
         float vy = 0.0f;
         float vz = v * cos(theta);
         scene.velocities[i] = glm::vec4(vx, vy, vz, 0.0f);
+
+        // scene.colors[i] = star_color(i * (seed + 1));
+        scene.colors[i] = star_color({x, y, z, m});
     }
 
     return scene;
+}
+
+// Galaxy no black hole
+Scene create_galaxy_scene(uint32_t seed)
+{
+    Scene scene;
+
+    std::mt19937 rng(seed);
+
+    std::uniform_real_distribution<float> masses(MASS_MIN, MASS_MAX);
+    std::uniform_real_distribution<float> angle(ANGLE_MIN, ANGLE_MAX);
+    std::uniform_real_distribution<float> radius(RADIUS_MIN, 0.25f * RADIUS_MAX);
+
+    for (std::size_t i = 0; i < Scene::COUNT; ++i)
+    {
+        float m = masses(rng); //* 3.8e5;
+
+        float r = radius(rng);
+        float theta = angle(rng);
+
+        float x = r * cos(theta);
+        float y = GALAXY_THICKNESS * radius(rng) * ((rng() % 2) ? 1.0f : -1.0f);
+        float z = r * sin(theta);
+        scene.positions_and_masses[i] = glm::vec4(x, y, z, m);
+
+        float v = sqrt(Scene::GRAVITY * 100);
+        float vx = -v * sin(theta);
+        float vy = 0.0f;
+        float vz = v * cos(theta);
+        scene.velocities[i] = glm::vec4(vx, vy, vz, 0.0f);
+
+        // scene.colors[i] = star_color(i * (seed + 1));
+        scene.colors[i] = star_color({x, y, z, m});
+    }
+
+    return scene;
+}
+
+Scene create_galaxy_collision_scene(uint32_t seed)
+{
+    Scene scene;
+
+    std::mt19937 rng(seed);
+
+    std::uniform_real_distribution<float> masses(MASS_MIN, MASS_MAX);
+    std::uniform_real_distribution<float> angle(ANGLE_MIN, ANGLE_MAX);
+    std::uniform_real_distribution<float> radius(RADIUS_MIN, RADIUS_MAX);
+
+    float x_offset = 1.25f * RADIUS_MAX;
+    float vx_offset = -2000.0f;
+    float vz_offset = -500.0f;
+
+    // First galaxy 
+    scene.positions_and_masses[0] = glm::vec4(x_offset, 0.0f, 0.0f, BLACK_HOLE_MASS);
+    scene.velocities[0] = glm::vec4(vx_offset, 0.0f, vz_offset, 0.0f);
+
+    for (std::size_t i = 1; i < Scene::COUNT / 2; ++i)
+    {
+        float m = masses(rng);
+
+        float r = radius(rng);
+        float theta = angle(rng);
+
+        float x = r * cos(theta) + x_offset;
+        float y = GALAXY_THICKNESS * radius(rng) * ((rng() % 2) ? 1.0f : -1.0f);
+        float z = r * sin(theta);
+        scene.positions_and_masses[i] = glm::vec4(x, y, z, m);
+
+        float v = sqrt(Scene::GRAVITY * BLACK_HOLE_MASS / r);
+        float vx = -v * sin(theta) + vx_offset;
+        float vy = 0.0f;
+        float vz = v * cos(theta) + vz_offset;
+        scene.velocities[i] = glm::vec4(vx, vy, vz, 0.0f);
+
+        scene.colors[i] = glm::vec4(0.8f, 0.4f, 0.3f, 1.0f);
+    }
+
+    // Second galaxy
+    scene.positions_and_masses[Scene::COUNT / 2] = glm::vec4(-x_offset, 0.0f, 0.0f, BLACK_HOLE_MASS);
+    scene.velocities[Scene::COUNT / 2] = glm::vec4(-vx_offset, 0.0f, -vz_offset, 0.0f);
+
+    for (std::size_t i = Scene::COUNT / 2 + 1; i < Scene::COUNT; ++i)
+    {
+        float m = masses(rng);
+
+        float r = radius(rng);
+        float theta = angle(rng);
+
+        float x = r * cos(theta) - x_offset;
+        float z = GALAXY_THICKNESS * radius(rng) * ((rng() % 2) ? 1.0f : -1.0f);
+        float y = r * sin(theta);
+        scene.positions_and_masses[i] = glm::vec4(x, y, z, m);
+
+        float v = sqrt(Scene::GRAVITY * BLACK_HOLE_MASS / r);
+        float vx = -v * sin(theta) - vx_offset;
+        float vz = 0.0f;
+        float vy = v * cos(theta) - vz_offset;
+        scene.velocities[i] = glm::vec4(vx, vy, vz, 0.0f);
+
+        scene.colors[i] = glm::vec4(0.3f, 0.7f, 0.2f, 1.0f);
+    }
+
+
+    return scene;
+
 }
 
 int main()
@@ -224,17 +385,19 @@ int main()
     }
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glEnable(GL_PROGRAM_POINT_SIZE);
+    glEnable(GL_DEPTH_TEST);
 
     glfwSwapInterval(1);
 
-    compute_program = make_compute_shader_program(compute_shader_filepath);
+    compute_program = make_compute_shader_program(COMPUTE_SHADER_FILEPATH);
     if (compute_program == GL_FALSE)
     {
         std::cerr << "Could not create compute shader program\n";
         return -1;
     }
 
-    render_program = make_shader_program(vertex_shader_filepath, fragment_shader_filepath);
+    render_program = make_shader_program(VERTEX_SHADER_FILEPATH, FRAGMENT_SHADER_FILEPATH);
     if (render_program == GL_FALSE)
     {
         std::cerr << "Could not create render shader program\n";
@@ -247,14 +410,14 @@ int main()
     compute_uniforms.count = glGetUniformLocation(compute_program, "count");
     compute_uniforms.dt = glGetUniformLocation(compute_program, "dt");
     compute_uniforms.gravity = glGetUniformLocation(compute_program, "gravity");
-    compute_uniforms.distance_threshold = glGetUniformLocation(compute_program, "distance_threshold");
     compute_uniforms.iter_per_frame = glGetUniformLocation(compute_program, "iter_per_frame");
+    compute_uniforms.softening = glGetUniformLocation(compute_program, "softening");
 
     assert(compute_uniforms.count != -1);
     assert(compute_uniforms.dt != -1);
     assert(compute_uniforms.gravity != -1);
-    assert(compute_uniforms.distance_threshold != -1);
     assert(compute_uniforms.iter_per_frame != -1);
+    assert(compute_uniforms.softening != -1);
 
     // Uniforms for render shader
     glUseProgram(render_program);
@@ -263,33 +426,36 @@ int main()
 
     assert(render_uniforms.mvp != -1);
 
-    // Input data for compute shader
-    Scene scene = create_scene(42);
-    double current_time = 0.0;
-    double last_time = 0.0;
-    double acc = 0.0;
-
     // Input buffers
-    GLuint positions_and_masses_buffer = 0;
+    GLuint positions_and_masses_in = 0;
     GLuint velocities_buffer = 0;
+    GLuint colors_buffer = 0;
 
-    glGenBuffers(1, &positions_and_masses_buffer);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, positions_and_masses_buffer);
+    // Output buffers
+    GLuint positions_and_masses_out = 0;
+
+    // Input data for compute shader
+    Scene scene = create_galaxy_collision_scene(42);
+
+    glGenBuffers(1, &positions_and_masses_in);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, positions_and_masses_in);
     glBufferData(GL_SHADER_STORAGE_BUFFER, Scene::COUNT * sizeof(scene.positions_and_masses[0]), scene.positions_and_masses.data(), GL_DYNAMIC_COPY);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, positions_and_masses_buffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, positions_and_masses_in);
 
     glGenBuffers(1, &velocities_buffer);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, velocities_buffer);
     glBufferData(GL_SHADER_STORAGE_BUFFER, Scene::COUNT * sizeof(scene.velocities[0]), scene.velocities.data(), GL_DYNAMIC_COPY);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, velocities_buffer);
 
-    // Output buffers
-    GLuint positions_and_masses_out = 0;
+    glGenBuffers(1, &colors_buffer);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, colors_buffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, Scene::COUNT * sizeof(scene.colors[0]), scene.colors.data(), GL_STATIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, colors_buffer);
 
     glGenBuffers(1, &positions_and_masses_out);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, positions_and_masses_out);
     glBufferData(GL_SHADER_STORAGE_BUFFER, Scene::COUNT * sizeof(scene.positions_and_masses[0]), nullptr, GL_DYNAMIC_COPY);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, positions_and_masses_out);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, positions_and_masses_out);
 
     // Unbind
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
@@ -297,6 +463,15 @@ int main()
     // Rendering
     GLuint vao = 0;
     glGenVertexArrays(1, &vao);
+    glBindBuffer(GL_ARRAY_BUFFER, positions_and_masses_in);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(glm::vec4), (void *)0);
+    glBindVertexArray(0);
+
+    // Simulation time
+    double current_time = 0.0;
+    double last_time = 0.0;
+    double acc = 0.0;
 
     std::cout << "Main loop start\n";
 
@@ -316,48 +491,59 @@ int main()
         while (acc >= Scene::DT)
         {
             // Rebind buffers
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, positions_and_masses_buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, positions_and_masses_in);
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, velocities_buffer);
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, positions_and_masses_out);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, colors_buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, positions_and_masses_out);
 
             // Launch compute shader
             glUseProgram(compute_program);
             glUniform1ui(compute_uniforms.count, Scene::COUNT);
             glUniform1f(compute_uniforms.dt, Scene::DT);
             glUniform1f(compute_uniforms.gravity, Scene::GRAVITY);
-            glUniform1f(compute_uniforms.distance_threshold, Scene::DISTANCE_THRESHOLD);
-            glUniform1ui(compute_uniforms.iter_per_frame, iteration_per_frame);
+            glUniform1ui(compute_uniforms.iter_per_frame, Scene::ITER_PER_FRAME);
+            glUniform1f(compute_uniforms.softening, Scene::SOFTENING);
 
-            glDispatchCompute(num_groups_x, num_groups_y, num_groups_z);
-            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+            glDispatchCompute(NUM_GROUPS_X, NUM_GROUPS_Y, NUM_GROUPS_Z);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
 
-            std::swap(positions_and_masses_buffer, positions_and_masses_out);
+            std::swap(positions_and_masses_in, positions_and_masses_out);
 
             acc -= Scene::DT;
         }
 
         // Rendering
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, positions_and_masses_buffer);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE);
         glViewport(0, 0, width, height);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDepthMask(GL_FALSE);
 
-        glm::mat4 proj = glm::perspective(glm::radians(fov), static_cast<float>(width) / static_cast<float>(height), 0.1f, 4.0f * radius_max);
+        glm::mat4 proj = glm::perspective(glm::radians(fov), static_cast<float>(width) / static_cast<float>(height), 1.0f, 8.0f * RADIUS_MAX);
         glm::mat4 view = glm::lookAt(glm::vec3(r * cos(phi) * sin(theta), r * sin(phi), r * cos(phi) * cos(theta)), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
         glm::mat4 mvp = proj * view;
 
         glUseProgram(render_program);
         glUniformMatrix4fv(render_uniforms.mvp, 1, GL_FALSE, glm::value_ptr(mvp));
         glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, positions_and_masses_in);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, colors_buffer);
         glDrawArrays(GL_POINTS, 0, Scene::COUNT);
+
+        // After render
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
     // Cleanup
-    glDeleteBuffers(1, &positions_and_masses_buffer);
+    glDeleteBuffers(1, &positions_and_masses_in);
     glDeleteBuffers(1, &velocities_buffer);
+    glDeleteBuffers(1, &colors_buffer);
     glDeleteBuffers(1, &positions_and_masses_out);
+    glDeleteVertexArrays(1, &vao);
     glDeleteProgram(compute_program);
 
     glfwDestroyWindow(window);
