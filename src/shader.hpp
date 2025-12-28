@@ -17,6 +17,9 @@ GLuint make_shader_program(const std::filesystem::path &vertex_filepath, const s
 [[nodiscard]]
 GLuint make_compute_shader_program(const std::filesystem::path &compute_filepath);
 
+[[nodiscard]]
+GLuint reload_shader_program(GLuint program, const std::filesystem::path &vertex_filepath, const std::filesystem::path &fragment_filepath);
+
 // Reload a compute shader program from file
 [[nodiscard]]
 GLuint reload_compute_shader_program(GLuint program, const std::filesystem::path &compute_filepath);

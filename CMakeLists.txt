@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.30)
-project(OpenGL-Compute-Shaders)
+project(NBody-GPU)
+
+# Set output folder to build
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+foreach(OUTPUTCONFIG IN LISTS CMAKE_CONFIGURATION_TYPES)
+    string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG_UPPER)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG_UPPER} ${CMAKE_BINARY_DIR})
+endforeach()
 
 # C++ 20
 set(CMAKE_CXX_STANDARD 20)
@@ -81,12 +88,6 @@ target_link_libraries(${PROJECT_NAME}
     glm::glm
     glad
 )
-
-# Set output folder to bin
-foreach(OUTPUTCONFIG IN LISTS CMAKE_CONFIGURATION_TYPES)
-    string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG_UPPER)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG_UPPER} ${CMAKE_BINARY_DIR}/bin)
-endforeach()
 
 # # Copy fonts and shaders
 # add_custom_target(copy_folders ALL

@@ -119,6 +119,17 @@ GLuint make_compute_shader_program(const std::filesystem::path &compute_filepath
     return shader_program;
 }
 
+GLuint reload_shader_program(GLuint program, const std::filesystem::path &vertex_filepath, const std::filesystem::path &fragment_filepath)
+{
+    GLuint new_program = make_shader_program(vertex_filepath, fragment_filepath);
+    if (new_program == GL_FALSE)
+    {
+        return program;
+    }
+    glDeleteProgram(program);
+    return new_program;
+}
+
 GLuint reload_compute_shader_program(GLuint program, const std::filesystem::path &compute_filepath)
 {
     GLuint new_program = make_compute_shader_program(compute_filepath);
