@@ -56,15 +56,15 @@ From the root folder, execute the following commands:
 
 ```sh
 cmake -B build
-cmake --build build
+cmake --build build --parallel
 ```
 
 ### Run the program
 
-To run the program, launch it from the build/bin folder:
+To run the program, launch it from the build folder:
 
 ```sh
-cd build/bin
+cd build
 ./NBody-GPU
 ```
 
