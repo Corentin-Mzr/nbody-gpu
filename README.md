@@ -16,7 +16,9 @@
 
 N-Body simulation that runs on the GPU with OpenGL.
 
-https://github.com/user-attachments/assets/4ce6d0a4-07fd-403d-91b8-b5dd15d11fff
+https://github.com/user-attachments/assets/f3cfb918-96d5-4c0b-aad4-6e8c20aac450
+
+https://github.com/user-attachments/assets/833fb001-f765-4651-9bcc-da2798033571
 
 ## Controls
 
