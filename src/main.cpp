@@ -302,7 +302,7 @@ int main()
     GLuint positions_and_masses_out = 0;
 
     // Input data for compute shader
-    Scene scene = create_galaxy_bh_scene(42);
+    Scene scene = create_galaxy_collision_scene(42);
 
     glGenBuffers(1, &positions_and_masses_in);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, positions_and_masses_in);
