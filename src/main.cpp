@@ -12,6 +12,7 @@
 #include "camera.hpp"
 #include "scene.hpp"
 #include "constants.hpp"
+#include "error_log.hpp"
 
 struct ComputeUniforms
 {
@@ -27,13 +28,20 @@ struct RenderUniforms
     GLint mvp;
 };
 
-/*
-- Mass in solar mass (1.9884e30 kg)
-- Distance in light year (9.461e15 m)
-- Time in 1M year (1M * 31 557 600s)
+// Inputs
+struct Input
+{
+    bool reloaded_shaders = true;
+    bool middle_button_pressed = false;
+    bool first_motion = true;
+    bool pause_simulation = true;
+    float xpos = 0.0f;
+    float ypos = 0.0f;
+};
+static Input input;
 
-=> G = 1.56e-5
-*/
+// Camera - looking at (0, 0, 0) from a sphere
+static Camera camera(1.25f * RADIUS_MAX, 0.0f, glm::radians(30.0f));
 
 // Shader related
 static GLuint compute_program = 0;
@@ -48,23 +56,92 @@ static constexpr GLuint NUM_GROUPS_X = (Scene::COUNT + WORKGROUP_SIZE - 1) / WOR
 static constexpr GLuint NUM_GROUPS_Y = 1;
 static constexpr GLuint NUM_GROUPS_Z = 1;
 
-// Inputs
-static bool reloaded = true;
-static bool middle_pressed = false;
-static bool first_motion = true;
+static constexpr std::string_view debug_source_to_string(GLenum source) noexcept
+{
+    switch (source)
+    {
+    case GL_DEBUG_SOURCE_API:
+        return "API";
+    case GL_DEBUG_SOURCE_WINDOW_SYSTEM:
+        return "WINDOW_SYSTEM";
+    case GL_DEBUG_SOURCE_SHADER_COMPILER:
+        return "SHADER_COMPILER";
+    case GL_DEBUG_SOURCE_THIRD_PARTY:
+        return "THIRD_PARTY";
+    case GL_DEBUG_SOURCE_APPLICATION:
+        return "APPLICATION";
+    case GL_DEBUG_SOURCE_OTHER:
+        return "OTHER";
+    default:
+        return "UNKNOWN_SOURCE";
+    }
+}
 
-// Camera - looking at (0, 0, 0) from a sphere
-static Camera camera(1.25f * RADIUS_MAX, 0.0f, glm::radians(30.0f));
-static float prev_xpos = 0.0f;
-static float prev_ypos = 0.0f;
+static constexpr std::string_view debug_type_to_string(GLenum type) noexcept
+{
+    switch (type)
+    {
+    case GL_DEBUG_TYPE_ERROR:
+        return "ERROR";
+    case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+        return "DEPRECATED_BEHAVIOR";
+    case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+        return "UNDEFINED_BEHAVIOR";
+    case GL_DEBUG_TYPE_PORTABILITY:
+        return "PORTABILITY";
+    case GL_DEBUG_TYPE_PERFORMANCE:
+        return "PERFORMANCE";
+    case GL_DEBUG_TYPE_MARKER:
+        return "MARKER";
+    case GL_DEBUG_TYPE_PUSH_GROUP:
+        return "PUSH_GROUP";
+    case GL_DEBUG_TYPE_POP_GROUP:
+        return "POP_GROUP";
+    case GL_DEBUG_TYPE_OTHER:
+        return "OTHER";
+    default:
+        return "UNKNOWN_TYPE";
+    }
+}
 
-static void error_callback(int error, const char *description)
+static constexpr std::string_view debug_severity_to_string(GLenum severity) noexcept
+{
+    switch (severity)
+    {
+    case GL_DEBUG_SEVERITY_HIGH:
+        return "HIGH";
+    case GL_DEBUG_SEVERITY_MEDIUM:
+        return "MEDIUM";
+    case GL_DEBUG_SEVERITY_LOW:
+        return "LOW";
+    case GL_DEBUG_SEVERITY_NOTIFICATION:
+        return "NOTIFICATION";
+    default:
+        return "UNKNOWN_SEVERITY";
+    }
+}
+
+static void GLAPIENTRY opengl_error_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei /*length*/, const GLchar *message, const void * /*userParam*/)
+{
+    if (severity == GL_DEBUG_SEVERITY_NOTIFICATION)
+    {
+        return;
+    }
+
+    std::string_view msg{message};
+    std::cerr << std::format("[OpenGL] Source={} | Type={} | Severity={} | ID={}\n{}\n",
+                             debug_source_to_string(source),
+                             debug_type_to_string(type),
+                             debug_severity_to_string(severity), id, msg);
+}
+
+static void glfw_error_callback(int error, const char *description)
 {
     std::string message = "GLFW Error (" + std::to_string(error) + "): " + description + "\n";
     std::cerr << message;
 }
 
-static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
+static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
     {
@@ -75,35 +152,40 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     {
         compute_program = reload_compute_shader_program(compute_program, COMPUTE_SHADER_FILEPATH);
         render_program = reload_shader_program(render_program, VERTEX_SHADER_FILEPATH, FRAGMENT_SHADER_FILEPATH);
-        reloaded = (compute_program != 0) || (render_program != 0);
+        input.reloaded_shaders = (compute_program != 0) || (render_program != 0);
+    }
+
+    if (key == GLFW_KEY_S && action == GLFW_PRESS)
+    {
+        input.pause_simulation = !input.pause_simulation;
     }
 }
 
-static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
+static void glfw_mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
 {
     if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS)
     {
-        middle_pressed = true;
+        input.middle_button_pressed = true;
     }
     else
     {
-        middle_pressed = false;
+        input.middle_button_pressed = false;
     }
 }
 
-static void mouse_motion_callback(GLFWwindow *window, double xpos, double ypos)
+static void glfw_mouse_motion_callback(GLFWwindow *window, double xpos, double ypos)
 {
-    if (first_motion)
+    if (input.first_motion)
     {
-        first_motion = false;
-        prev_xpos = xpos;
-        prev_ypos = ypos;
+        input.first_motion = false;
+        input.xpos = xpos;
+        input.ypos = ypos;
     }
 
-    if (middle_pressed)
+    if (input.middle_button_pressed)
     {
-        float dx = xpos - prev_xpos;
-        float dy = ypos - prev_ypos;
+        float dx = xpos - input.xpos;
+        float dy = ypos - input.ypos;
 
         camera.theta -= dx * 0.01f;
         camera.phi += dy * 0.01f;
@@ -111,11 +193,11 @@ static void mouse_motion_callback(GLFWwindow *window, double xpos, double ypos)
         camera.phi = std::clamp(camera.phi, -0.5f * PI + 0.01f, 0.5f * PI - 0.01f);
     }
 
-    prev_xpos = xpos;
-    prev_ypos = ypos;
+    input.xpos = xpos;
+    input.ypos = ypos;
 }
 
-static void mouse_scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
+static void glfw_mouse_scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
 {
     camera.r -= yoffset * camera.ZOOM_FACTOR;
     camera.r = std::clamp(camera.r, 0.5f * RADIUS_MIN, 2.0f * RADIUS_MAX);
@@ -131,7 +213,7 @@ int main()
 {
     std::cout << "Hello World\n";
 
-    glfwSetErrorCallback(error_callback);
+    glfwSetErrorCallback(glfw_error_callback);
 
     if (!glfwInit())
     {
@@ -154,15 +236,15 @@ int main()
     }
     std::cout << "GLFW Window OK\n";
 
-    glfwSetKeyCallback(window, key_callback);
-    glfwSetCursorPosCallback(window, mouse_motion_callback);
-    glfwSetMouseButtonCallback(window, mouse_button_callback);
-    glfwSetScrollCallback(window, mouse_scroll_callback);
+    glfwSetKeyCallback(window, glfw_key_callback);
+    glfwSetCursorPosCallback(window, glfw_mouse_motion_callback);
+    glfwSetMouseButtonCallback(window, glfw_mouse_button_callback);
+    glfwSetScrollCallback(window, glfw_mouse_scroll_callback);
     glfwMakeContextCurrent(window);
 
     if (!gladLoadGL(glfwGetProcAddress))
     {
-        std::cerr << "Failed to initialize GLAD\n";
+        log_error(ErrorType::GLADInitialization, "Failed to initialize GLAD");
         return -1;
     }
 
@@ -170,19 +252,22 @@ int main()
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
 
+    // Enable debug output
+    glEnable(GL_DEBUG_OUTPUT);
+    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+    glDebugMessageCallback(opengl_error_callback, 0);
+
     glfwSwapInterval(1);
 
     compute_program = make_compute_shader_program(COMPUTE_SHADER_FILEPATH);
     if (compute_program == GL_FALSE)
     {
-        std::cerr << "Could not create compute shader program\n";
         return -1;
     }
 
     render_program = make_shader_program(VERTEX_SHADER_FILEPATH, FRAGMENT_SHADER_FILEPATH);
     if (render_program == GL_FALSE)
     {
-        std::cerr << "Could not create render shader program\n";
         return -1;
     }
 
@@ -245,6 +330,7 @@ int main()
     // Rendering
     GLuint vao = 0;
     glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, positions_and_masses_in);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(glm::vec4), (void *)0);
@@ -270,7 +356,7 @@ int main()
             acc = 0.25;
         }
 
-        while (acc >= Scene::DT)
+        while (acc >= Scene::DT && !input.pause_simulation)
         {
             // Rebind buffers
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, positions_and_masses_in);

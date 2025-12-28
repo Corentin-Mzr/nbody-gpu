@@ -3,6 +3,13 @@
 #include <vector>
 #include <glm/glm.hpp>
 
+/*
+- Mass in solar mass (1.9884e30 kg)
+- Distance in light year (9.461e15 m)
+- Time in 1M year (1M * 31 557 600s)
+=> G = G_SI * MASS * TIME^2 / DISTANCE^3 = 1.56e-5
+*/
+
 struct Scene
 {
     static constexpr std::size_t COUNT = 32768;

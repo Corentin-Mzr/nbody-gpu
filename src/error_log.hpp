@@ -9,10 +9,11 @@ enum class ErrorType
 {
     ShaderModuleCreation,
     ShaderModuleCompilation,
-    ShaderProgramLinking
+    ShaderProgramLinking,
+    GLADInitialization,
 };
 
-void log_error(ErrorType type, std::string_view what)
+inline void log_error(ErrorType type, std::string_view what)
 {
     std::string_view error;
     switch (type)
@@ -26,6 +27,8 @@ void log_error(ErrorType type, std::string_view what)
         case ErrorType::ShaderProgramLinking:
             error = "[SHADER PROGRAM LINKING ERROR]\n";
             break;
+        case ErrorType::GLADInitialization:
+            error = "[GLAD INITIALIZATION ERROR]\n";
     }
     
     std::cerr << std::format("{}{}\n", error, what);
