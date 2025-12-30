@@ -1,6 +1,7 @@
 #include "scene.hpp"
 #include "constants.hpp"
 #include <random>
+#include <array>
 
 [[nodiscard]]
 static float hash(uint32_t seed)
@@ -184,6 +185,130 @@ Scene create_galaxy_collision_scene(uint32_t seed)
         scene.velocities[i] = glm::vec4(vx, vy, vz, 0.0f);
 
         scene.colors[i] = glm::vec4(0.3f, 0.7f, 0.2f, 1.0f);
+    }
+
+    return scene;
+}
+
+Scene create_spheric_inequal(uint32_t seed)
+{
+    Scene scene;
+
+    std::mt19937 rng(seed);
+
+    std::uniform_real_distribution<float> masses(MASS_MIN, MASS_MIN);
+    std::uniform_real_distribution<float> longitude(ANGLE_MIN, ANGLE_MAX);
+    std::uniform_real_distribution<float> colatitude(ANGLE_MIN, PI);
+    std::uniform_real_distribution<float> radius(RADIUS_MIN, RADIUS_MIN);
+
+    for (std::size_t i = 0; i < Scene::COUNT; ++i)
+    {
+        float m = 1.0f;
+        float theta = longitude(rng);
+        float phi = colatitude(rng);
+        float r = radius(rng);
+
+        float y = r * sin(phi) * cos(theta);
+        float z = r * sin(phi) * sin(theta);
+        float x = r * cos(phi);
+
+        float vx = x / r;
+        float vy = y / r;
+        float vz = z / r;
+
+        float cr = x >= 0.0f ? 1.0f : 0.0f;
+        float cg = x < 0.0f ? 1.0f : 0.0f;
+        float cb = 0.0f;
+
+        scene.positions_and_masses[i] = glm::vec4(x, y, z, m);
+        scene.velocities[i] = glm::vec4(vx, vy, vz, 0.0f);
+        scene.colors[i] = glm::vec4(cr, cg, cb, 1.0f);
+    }
+
+    return scene;
+}
+
+Scene create_universe(uint32_t seed)
+{
+    Scene scene;
+
+    std::mt19937 rng(seed);
+
+    std::uniform_real_distribution<float> masses(MASS_MIN, MASS_MAX);
+    std::uniform_real_distribution<float> longitude(ANGLE_MIN, ANGLE_MAX);
+    std::uniform_real_distribution<float> radius(RADIUS_MIN, RADIUS_MIN);
+
+    std::uniform_real_distribution<float> normal(0.0f, 1.0f);
+
+    for (std::size_t i = 0; i < Scene::COUNT; ++i)
+    {
+        float m = masses(rng);
+        float r = radius(rng);
+        float theta = longitude(rng);
+
+        float u = normal(rng);
+        float phi = acosf(1 - 2 * u);
+
+        float x = r * sin(phi) * cos(theta);
+        float y = r * sin(phi) * sin(theta);
+        float z = r * cos(phi);
+
+        float vx = x / r;
+        float vy = y / r;
+        float vz = z / r;
+
+        float cr = x >= 0.0f ? 0.4f : 0.6f;
+        float cg = x < 0.0f ? 0.3f : 0.7f;
+        float cb = 0.7f;
+
+        scene.positions_and_masses[i] = glm::vec4(x, y, z, m);
+        scene.velocities[i] = glm::vec4(vx, vy, vz, 0.0f);
+        scene.colors[i] = glm::vec4(cr, cg, cb, 1.0f);
+    }
+
+    return scene;
+}
+
+Scene create_sun_collapse(uint32_t seed)
+{
+    Scene scene;
+
+    std::mt19937 rng(seed);
+
+    // std::uniform_real_distribution<float> masses(MASS_MIN, MASS_MAX);
+    std::uniform_real_distribution<float> longitude(ANGLE_MIN, ANGLE_MAX);
+    // std::uniform_real_distribution<float> radius(RADIUS_MAX, RADIUS_MAX);
+    std::uniform_real_distribution<float> normal(0.0f, 1.0f);
+    std::uniform_int_distribution<int> index(0, 4);
+
+    static constexpr std::array<glm::vec4, 5> sun_colors = {
+        glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),
+        glm::vec4(1.0f, 0.894f, 0.518f, 1.0f),
+        glm::vec4(1.0f, 0.8f, 0.2f, 1.0f),
+        glm::vec4(0.988f, 0.588f, 0.004f, 1.0f),
+        glm::vec4(0.82f, 0.251f, 0.035f, 1.0f)
+    };
+
+    for (std::size_t i = 0; i < Scene::COUNT; ++i)
+    {
+        float m = MASS_MAX; //masses(rng);
+        float r = RADIUS_MAX; //radius(rng);
+        float theta = longitude(rng);
+
+        float u = normal(rng);
+        float phi = acosf(1 - 2 * u);
+
+        float x = r * sin(phi) * cos(theta);
+        float y = r * sin(phi) * sin(theta);
+        float z = r * cos(phi);
+
+        float vx = x / r;
+        float vy = y / r;
+        float vz = z / r;
+
+        scene.positions_and_masses[i] = glm::vec4(x, y, z, m);
+        scene.velocities[i] = glm::vec4(vx, vy, vz, 0.0f);
+        scene.colors[i] = sun_colors[index(rng)];
     }
 
     return scene;

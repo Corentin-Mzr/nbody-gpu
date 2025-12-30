@@ -16,7 +16,7 @@ struct Scene
     static constexpr float DT = 1.0f / 60.0f;
     static constexpr float GRAVITY = 156000.f; // 1.0f;
     static constexpr std::size_t ITER_PER_FRAME = 1;
-    static constexpr float SOFTENING = 150.0f;
+    static constexpr float SOFTENING = 156.0f;
 
     std::vector<glm::vec4> positions_and_masses; // x, y, z, m
     std::vector<glm::vec4> velocities;           // vx, vy, vz, 0
@@ -40,4 +40,17 @@ Scene create_galaxy_bh_scene(uint32_t seed);
 Scene create_galaxy_scene(uint32_t seed);
 
 // Two galaxies colliding
+[[nodiscard]]
 Scene create_galaxy_collision_scene(uint32_t seed);
+
+// Spherical generation with bias
+[[nodiscard]]
+Scene create_spheric_inequal(uint32_t seed);
+
+// Big bang effect
+[[nodiscard]]
+Scene create_universe(uint32_t seed);
+
+// Collapse effect
+[[nodiscard]]
+Scene create_sun_collapse(uint32_t seed);

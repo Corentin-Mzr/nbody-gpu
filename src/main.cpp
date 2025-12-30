@@ -41,7 +41,7 @@ struct Input
 static Input input;
 
 // Camera - looking at (0, 0, 0) from a sphere
-static Camera camera(1.25f * RADIUS_MAX, 0.0f, glm::radians(30.0f));
+static Camera camera;
 
 // Shader related
 static GLuint compute_program = 0;
@@ -212,6 +212,8 @@ std::string vec3_to_string(const glm::vec3 &v)
 int main()
 {
     std::cout << "Hello World\n";
+    
+    camera.phi = glm::radians(30.0f);
 
     glfwSetErrorCallback(glfw_error_callback);
 
@@ -302,7 +304,7 @@ int main()
     GLuint positions_and_masses_out = 0;
 
     // Input data for compute shader
-    Scene scene = create_galaxy_collision_scene(42);
+    Scene scene = create_spheric_inequal(42);
 
     glGenBuffers(1, &positions_and_masses_in);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, positions_and_masses_in);

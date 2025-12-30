@@ -2,6 +2,7 @@
 
 // Scene creation params
 static constexpr float PI = 3.141592653589793;
+static constexpr float PI_HALF = 0.5f * PI;
 static constexpr float MASS_MIN = 0.1f;
 static constexpr float MASS_MAX = 100.0f;
 static constexpr float ANGLE_MIN = 0.0f;
