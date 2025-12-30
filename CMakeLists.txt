@@ -23,6 +23,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/glfw/glfw.git
     GIT_TAG 3.4
     GIT_SHALLOW TRUE
+    GIT_PROGRESS TRUE
     EXCLUDE_FROM_ALL
     SYSTEM)
 
@@ -39,6 +40,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/g-truc/glm.git
     GIT_TAG 1.0.2
     GIT_SHALLOW TRUE
+    GIT_PROGRESS TRUE
     EXCLUDE_FROM_ALL
     SYSTEM)
 
@@ -63,6 +65,7 @@ glad_add_library(
     EXCLUDE_FROM_ALL
     LOADER
     API gl:core=4.6
+    EXTENSIONS GL_ARB_bindless_texture GL_EXT_texture_compression_s3tc
 )
 
 # Glob for source files
@@ -76,23 +79,13 @@ add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
 # Include directories
 target_include_directories(${PROJECT_NAME}
-    PRIVATE
-    src
+    PRIVATE src
 )
 
 # Link libs
 target_link_libraries(${PROJECT_NAME}
-    PRIVATE
-    OpenGL::GL
-    glfw
-    glm::glm
-    glad
+    PRIVATE OpenGL::GL
+    PRIVATE glfw
+    PRIVATE glm::glm
+    PRIVATE glad
 )
-
-# # Copy fonts and shaders
-# add_custom_target(copy_folders ALL
-#     COMMAND ${CMAKE_COMMAND} -E copy_directory
-#     ${CMAKE_SOURCE_DIR}/fonts ${CMAKE_BINARY_DIR}/fonts
-#     COMMAND ${CMAKE_COMMAND} -E copy_directory
-#     ${CMAKE_SOURCE_DIR}/shaders ${CMAKE_BINARY_DIR}/shaders
-# )

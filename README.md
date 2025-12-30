@@ -23,7 +23,7 @@ N-Body simulation that runs on the GPU with OpenGL.
 ## Controls
 
 - Camera is centered on (0, 0, 0). Use middle mouse button to move around the origin and mouse wheel to zoom in/out
-- S to start/stop the simulation
+- S to start/stop the simulation. **The simulation is stopped by default**
 - ESC to close the window
 
 ## Installation
