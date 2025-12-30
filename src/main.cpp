@@ -304,7 +304,7 @@ int main()
     GLuint positions_and_masses_out = 0;
 
     // Input data for compute shader
-    Scene scene = create_spheric_inequal(42);
+    Scene scene = create_sun_collapse(42);
 
     glGenBuffers(1, &positions_and_masses_in);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, positions_and_masses_in);
